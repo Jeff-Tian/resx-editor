@@ -47,18 +47,45 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
 
         webviewPanel.webview.onDidReceiveMessage(
             async (message) => {
-                switch (message.type) {
-                    case 'save':
-                        await this.saveResxFiles(document.uri, message.data);
-                        return;
-                    case 'addRow':
-                        await this.addNewRow(document.uri, message.key);
-                        await updateWebview();
-                        return;
-                    case 'deleteRow':
-                        await this.deleteRow(document.uri, message.key);
-                        await updateWebview();
-                        return;
+                try {
+                    console.log('Received message:', message);
+                    switch (message.type) {
+                        case 'save':
+                            await this.saveResxFiles(document.uri, message.data);
+                            return;
+                        case 'requestAddRow':
+                            const key = await vscode.window.showInputBox({
+                                prompt: 'Enter new key name',
+                                placeHolder: 'e.g., WelcomeMessage',
+                                validateInput: (value) => {
+                                    if (!value || !value.trim()) {
+                                        return 'Key name cannot be empty';
+                                    }
+                                    return null;
+                                }
+                            });
+                            if (key) {
+                                await this.addNewRow(document.uri, key.trim());
+                                await updateWebview();
+                                vscode.window.showInformationMessage(`Added new key: ${key}`);
+                            }
+                            return;
+                        case 'requestDeleteRow':
+                            const result = await vscode.window.showWarningMessage(
+                                `Are you sure you want to delete key "${message.key}"?`,
+                                { modal: true },
+                                'Delete'
+                            );
+                            if (result === 'Delete') {
+                                await this.deleteRow(document.uri, message.key);
+                                await updateWebview();
+                                vscode.window.showInformationMessage(`Deleted key: ${message.key}`);
+                            }
+                            return;
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Error: ${error}`);
+                    console.error('Error handling message:', error);
                 }
             }
         );
@@ -230,11 +257,93 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
     }
 
     private async addNewRow(baseUri: vscode.Uri, key: string): Promise<void> {
-        // Implementation for adding new row
+        const basePath = baseUri.fsPath;
+        const dir = path.dirname(basePath);
+        const baseFileName = path.basename(basePath, '.resx');
+        const files = fs.readdirSync(dir);
+
+        // Add to default file
+        await this.addKeyToFile(basePath, key);
+
+        // Add to all language-specific files
+        for (const file of files) {
+            const match = file.match(new RegExp(`^${baseFileName}\\.([a-zA-Z]{2}-[a-zA-Z]{2})\\.resx$`));
+            if (match) {
+                const filePath = path.join(dir, file);
+                await this.addKeyToFile(filePath, key);
+            }
+        }
+    }
+
+    private async addKeyToFile(filePath: string, key: string): Promise<void> {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        
+        return new Promise((resolve, reject) => {
+            parseString(content, async (err, result) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+
+                if (!result.root.data) {
+                    result.root.data = [];
+                }
+
+                // Check if key already exists
+                const exists = result.root.data.some((data: any) => data.$.name === key);
+                if (!exists) {
+                    const newEntry = {
+                        $: { name: key, 'xml:space': 'preserve' },
+                        value: ['']
+                    };
+                    result.root.data.push(newEntry);
+
+                    const builder = new Builder({ xmldec: { version: '1.0', encoding: 'utf-8' } });
+                    const xml = builder.buildObject(result);
+                    fs.writeFileSync(filePath, xml, 'utf-8');
+                }
+
+                resolve();
+            });
+        });
     }
 
     private async deleteRow(baseUri: vscode.Uri, key: string): Promise<void> {
-        // Implementation for deleting row
+        const basePath = baseUri.fsPath;
+        const dir = path.dirname(basePath);
+        const baseFileName = path.basename(basePath, '.resx');
+        const files = fs.readdirSync(dir);
+
+        const resxFiles = [basePath];
+        for (const file of files) {
+            const match = file.match(new RegExp(`^${baseFileName}\\.([a-zA-Z]{2}-[a-zA-Z]{2})\\.resx$`));
+            if (match) {
+                resxFiles.push(path.join(dir, file));
+            }
+        }
+
+        for (const filePath of resxFiles) {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            
+            await new Promise<void>((resolve, reject) => {
+                parseString(content, (err, result) => {
+                    if (err) {
+                        reject(err);
+                        return;
+                    }
+
+                    if (result.root && result.root.data) {
+                        result.root.data = result.root.data.filter((data: any) => data.$.name !== key);
+                        
+                        const builder = new Builder({ xmldec: { version: '1.0', encoding: 'utf-8' } });
+                        const xml = builder.buildObject(result);
+                        fs.writeFileSync(filePath, xml, 'utf-8');
+                    }
+
+                    resolve();
+                });
+            });
+        }
     }
 
     private getHtmlForWebview(webview: vscode.Webview, resxData: ResxDocument): string {
@@ -255,6 +364,15 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             }
             return row;
         });
+
+        const escapeHtml = (str: string) => {
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        };
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -353,17 +471,17 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             </thead>
             <tbody>
                 ${rows.map(row => `
-                    <tr data-key="${row.key}">
+                    <tr data-key="${escapeHtml(row.key)}">
                         <td class="key-cell">
-                            <input type="text" value="${row.key}" onchange="updateKey(this)" />
+                            <input type="text" value="${escapeHtml(row.key)}" onchange="updateKey(this)" />
                         </td>
                         ${languages.map(lang => `
                             <td class="value-cell">
-                                <textarea rows="2" onchange="updateValue(this, '${row.key}', '${lang}')">${row[lang] || ''}</textarea>
+                                <textarea rows="2" onchange="updateValue(this, '${escapeHtml(row.key)}', '${escapeHtml(lang)}')">${escapeHtml(row[lang] || '')}</textarea>
                             </td>
                         `).join('')}
                         <td class="action-cell">
-                            <button class="delete-btn" onclick="deleteRow('${row.key}')">Delete</button>
+                            <button class="delete-btn" onclick="deleteRow('${escapeHtml(row.key)}')">Delete</button>
                         </td>
                     </tr>
                 `).join('')}
@@ -372,62 +490,60 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
     </div>
 
     <script>
-        const vscode = acquireVsCodeApi();
-        let data = ${JSON.stringify(resxData, (key, value) => 
-            value instanceof Map ? Object.fromEntries(value) : value
-        )};
+        (function() {
+            const vscode = acquireVsCodeApi();
+            let data = ${JSON.stringify(resxData, (key, value) => 
+                value instanceof Map ? Object.fromEntries(value) : value
+            )};
 
-        function updateValue(element, key, language) {
-            if (!data[language]) {
-                data[language] = {};
-            }
-            if (!data[language][key]) {
-                data[language][key] = { name: key, value: '' };
-            }
-            data[language][key].value = element.value;
-        }
-
-        function updateKey(element) {
-            const oldKey = element.closest('tr').dataset.key;
-            const newKey = element.value;
-            
-            if (oldKey !== newKey && newKey) {
-                const languages = Object.keys(data);
-                for (const lang of languages) {
-                    if (data[lang][oldKey]) {
-                        data[lang][newKey] = { ...data[lang][oldKey], name: newKey };
-                        delete data[lang][oldKey];
-                    }
+            window.updateValue = function(element, key, language) {
+                if (!data[language]) {
+                    data[language] = {};
                 }
-                element.closest('tr').dataset.key = newKey;
-            }
-        }
+                if (!data[language][key]) {
+                    data[language][key] = { name: key, value: '' };
+                }
+                data[language][key].value = element.value;
+            };
 
-        function addRow() {
-            const key = prompt('Enter new key name:');
-            if (key && key.trim()) {
+            window.updateKey = function(element) {
+                const oldKey = element.closest('tr').dataset.key;
+                const newKey = element.value;
+                
+                if (oldKey !== newKey && newKey) {
+                    const languages = Object.keys(data);
+                    for (const lang of languages) {
+                        if (data[lang][oldKey]) {
+                            data[lang][newKey] = { ...data[lang][oldKey], name: newKey };
+                            delete data[lang][oldKey];
+                        }
+                    }
+                    element.closest('tr').dataset.key = newKey;
+                }
+            };
+
+            window.addRow = function() {
                 vscode.postMessage({
-                    type: 'addRow',
-                    key: key.trim()
+                    type: 'requestAddRow'
                 });
-            }
-        }
+            };
 
-        function deleteRow(key) {
-            if (confirm(\`Are you sure you want to delete key "\${key}"?\`)) {
+            window.deleteRow = function(key) {
                 vscode.postMessage({
-                    type: 'deleteRow',
+                    type: 'requestDeleteRow',
                     key: key
                 });
-            }
-        }
+            };
 
-        function saveData() {
-            vscode.postMessage({
-                type: 'save',
-                data: data
-            });
-        }
+            window.saveData = function() {
+                vscode.postMessage({
+                    type: 'save',
+                    data: data
+                });
+            };
+
+            console.log('Resx Editor initialized');
+        })();
     </script>
 </body>
 </html>`;

@@ -557,7 +557,7 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             const columnKeys = ${JSON.stringify(columnKeys)};
             const defaultColumnWidths = ${JSON.stringify(defaultColumnWidths)};
             let columnWidths = persistedState.columnWidths || {};
-            let fitMode = persistedState.fitMode || false;
+            let fitMode = (typeof persistedState.fitMode === 'boolean') ? persistedState.fitMode : true;
 
             const colMap = {};
             const colEls = document.querySelectorAll('col[data-col-key]');
@@ -629,8 +629,6 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
                 applyFitModeClass();
                 applyColumnWidths();
                 persistLayout();
-
-                console.log('[resx-editor] fitColumns applied', { containerWidth, keyWidth, actionWidth, perLang, columns: languageCols.length });
             };
 
             window.fitColumns = function() {
@@ -640,7 +638,6 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             const fitColumnsBtn = document.getElementById('fitColumnsBtn');
             if (fitColumnsBtn) {
                 fitColumnsBtn.addEventListener('click', () => {
-                    console.log('[resx-editor] fitColumns click');
                     fitColumnsToWindow();
                 });
             }
@@ -654,15 +651,12 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
                         const colKey = handle.getAttribute('data-col-key');
                         if (!colKey) return;
 
-                        console.log('[resx-editor] resize start', colKey);
-
                         // manual resize disables fit mode
                         fitMode = false;
                         applyFitModeClass();
 
                         const colEl = getColElement(colKey);
                         if (!colEl) {
-                            console.warn('[resx-editor] resize: missing <col> for key', colKey, { known: Object.keys(colMap) });
                             return;
                         }
 
@@ -700,11 +694,10 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             applyColumnWidths();
             installResizeHandles();
 
-            console.log('[resx-editor] layout init', {
-                colsInDom: colEls.length,
-                handlesInDom: document.querySelectorAll('.resize-handle').length,
-                knownColKeys: Object.keys(colMap)
-            });
+            // Default to Fit Columns on first open; if user manually resizes, fitMode is turned off.
+            if (fitMode) {
+                fitColumnsToWindow();
+            }
 
             window.addEventListener('resize', () => {
                 if (fitMode) {

@@ -1,4 +1,13 @@
 .vscode/
 examples/
-out/
 node_modules/
+
+# Dev-only / repo-only files
+.github/
+src/
+pnpm-lock.yaml
+tsconfig.json
+.gitignore
+
+# Source maps are not required at runtime
+out/**/*.map

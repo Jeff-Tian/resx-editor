@@ -1,12 +1,12 @@
 {
-  "name": "resx-editor",
-  "displayName": "Resx Editor",
+  "name": "resx-editor-x",
+  "displayName": "Resx Editor Advanced",
   "description": "Visual editor for .NET resx files with multi-language support",
   "version": "1.0.0",
   "publisher": "jeff-tian",
   "packageManager": "pnpm@10.26.1+sha512.664074abc367d2c9324fdc18037097ce0a8f126034160f709928e9e9f95d98714347044e5c3164d65bd5da6c59c6be362b107546292a8eecb7999196e5ce58fa",
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.107.0"
   },
   "categories": [
     "Other"
@@ -60,11 +60,15 @@
       }
     }
   },
+  "vsce": {
+    "dependencies": false
+  },
   "scripts": {
-    "vscode:prepublish": "pnpm run compile",
+    "vscode:prepublish": "pnpm run bundle",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package"
+    "bundle": "pnpm exec esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=out/extension.js",
+    "package": "vsce package --no-dependencies"
   },
   "keywords": [],
   "author": "",

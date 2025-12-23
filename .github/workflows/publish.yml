@@ -54,4 +54,4 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
-          pnpm dlx @vscode/vsce publish --pat "$VSCE_PAT"
+          pnpm dlx @vscode/vsce publish --no-dependencies --pat "$VSCE_PAT"

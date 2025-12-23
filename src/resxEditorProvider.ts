@@ -385,6 +385,19 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
                 .replace(/'/g, '&#39;');
         };
 
+        const columnKeys = ['__key', ...languages, '__actions'];
+        const defaultColumnWidths: Record<string, number> = {
+            __key: 260,
+            __actions: 90,
+        };
+        for (const lang of languages) {
+            defaultColumnWidths[lang] = 320;
+        }
+
+        const colGroupHtml = columnKeys
+            .map((colKey) => `<col data-col-key="${escapeHtml(colKey)}" style="width: ${(defaultColumnWidths[colKey] ?? 200)}px;" />`)
+            .join('');
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -421,11 +434,13 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             width: 100%;
             border-collapse: collapse;
             background: var(--vscode-editor-background);
+            table-layout: fixed;
         }
         th, td {
             border: 1px solid var(--vscode-panel-border);
             padding: 8px;
             text-align: left;
+            overflow: hidden;
         }
         th {
             background: var(--vscode-editor-inactiveSelectionBackground);
@@ -433,6 +448,22 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             position: sticky;
             top: 0;
             z-index: 10;
+        }
+        th.resizable {
+            position: relative;
+        }
+        .resize-handle {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 8px;
+            height: 100%;
+            cursor: col-resize;
+            user-select: none;
+            touch-action: none;
+        }
+        .resize-handle:hover {
+            background: var(--vscode-focusBorder);
         }
         input, textarea {
             width: 100%;
@@ -446,12 +477,12 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             outline: 1px solid var(--vscode-focusBorder);
         }
         .key-cell {
-            min-width: 200px;
-            max-width: 300px;
+            min-width: 0;
+            max-width: none;
         }
         .value-cell {
-            min-width: 250px;
-            max-width: 400px;
+            min-width: 0;
+            max-width: none;
         }
         .delete-btn {
             background: var(--vscode-errorForeground);
@@ -460,23 +491,38 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             font-size: 12px;
         }
         .action-cell {
-            width: 80px;
             text-align: center;
+        }
+        body.fit-mode .grid-container {
+            overflow-x: hidden;
+        }
+        body.fit-mode .key-cell,
+        body.fit-mode .value-cell {
+            min-width: 0;
+            max-width: none;
+        }
+        body.fit-mode textarea,
+        body.fit-mode input {
+            min-width: 0;
         }
     </style>
 </head>
 <body>
     <div class="toolbar">
         <button onclick="addRow()">Add New Key</button>
+        <button id="fitColumnsBtn">Fit Columns</button>
         <button onclick="saveData()">Save All</button>
     </div>
     
-    <div class="grid-container">
+    <div class="grid-container" id="gridContainer">
         <table id="resxTable">
+            <colgroup>
+                ${colGroupHtml}
+            </colgroup>
             <thead>
                 <tr>
-                    <th>Key</th>
-                    ${languages.map(lang => `<th>${lang === 'default' ? 'Default' : lang}</th>`).join('')}
+                    <th class="resizable" data-col-key="__key">Key<div class="resize-handle" data-col-key="__key"></div></th>
+                    ${languages.map(lang => `<th class="resizable" data-col-key="${escapeHtml(lang)}">${lang === 'default' ? 'Default' : escapeHtml(lang)}<div class="resize-handle" data-col-key="${escapeHtml(lang)}"></div></th>`).join('')}
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -503,9 +549,168 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
     <script>
         (function() {
             const vscode = acquireVsCodeApi();
+            const persistedState = vscode.getState() || {};
             let data = ${JSON.stringify(resxData, (key, value) => 
                 value instanceof Map ? Object.fromEntries(value) : value
             )};
+
+            const columnKeys = ${JSON.stringify(columnKeys)};
+            const defaultColumnWidths = ${JSON.stringify(defaultColumnWidths)};
+            let columnWidths = persistedState.columnWidths || {};
+            let fitMode = persistedState.fitMode || false;
+
+            const colMap = {};
+            const colEls = document.querySelectorAll('col[data-col-key]');
+            for (const colEl of colEls) {
+                const key = colEl.getAttribute('data-col-key');
+                if (key) colMap[key] = colEl;
+            }
+
+            const getColElement = (colKey) => {
+                return colMap[colKey] || null;
+            };
+
+            const applyFitModeClass = () => {
+                document.body.classList.toggle('fit-mode', !!fitMode);
+            };
+
+            const applyColumnWidths = () => {
+                for (const colKey of columnKeys) {
+                    const colEl = getColElement(colKey);
+                    if (!colEl) continue;
+                    const widthSource = (columnWidths[colKey] !== undefined && columnWidths[colKey] !== null)
+                        ? columnWidths[colKey]
+                        : defaultColumnWidths[colKey];
+                    const width = Number(widthSource);
+                    if (Number.isFinite(width) && width > 0) {
+                        colEl.style.width = String(width) + 'px';
+                    }
+                }
+            };
+
+            const persistLayout = () => {
+                vscode.setState({
+                    columnWidths,
+                    fitMode
+                });
+            };
+
+            const fitColumnsToWindow = () => {
+                const container = document.getElementById('gridContainer');
+                if (!container) return;
+
+                const containerWidth = container.clientWidth;
+                const languageCols = ${JSON.stringify(languages)};
+                const actionWidth = Number((columnWidths.__actions !== undefined && columnWidths.__actions !== null)
+                    ? columnWidths.__actions
+                    : (defaultColumnWidths.__actions !== undefined && defaultColumnWidths.__actions !== null ? defaultColumnWidths.__actions : 90));
+                const keyWidth = Math.min(
+                    Math.max(
+                        180,
+                        Number((columnWidths.__key !== undefined && columnWidths.__key !== null)
+                            ? columnWidths.__key
+                            : (defaultColumnWidths.__key !== undefined && defaultColumnWidths.__key !== null ? defaultColumnWidths.__key : 260))
+                    ),
+                    420
+                );
+
+                // Account for borders/padding/scrollbar rounding so we reliably eliminate horizontal overflow.
+                const overhead = 48;
+                const available = Math.max(0, containerWidth - keyWidth - actionWidth - overhead);
+                const perLang = Math.max(60, Math.floor(available / Math.max(1, languageCols.length)));
+
+                const next = Object.assign({}, columnWidths, { __key: keyWidth, __actions: actionWidth });
+                for (const lang of languageCols) {
+                    next[lang] = perLang;
+                }
+
+                columnWidths = next;
+                fitMode = true;
+                applyFitModeClass();
+                applyColumnWidths();
+                persistLayout();
+
+                console.log('[resx-editor] fitColumns applied', { containerWidth, keyWidth, actionWidth, perLang, columns: languageCols.length });
+            };
+
+            window.fitColumns = function() {
+                fitColumnsToWindow();
+            };
+
+            const fitColumnsBtn = document.getElementById('fitColumnsBtn');
+            if (fitColumnsBtn) {
+                fitColumnsBtn.addEventListener('click', () => {
+                    console.log('[resx-editor] fitColumns click');
+                    fitColumnsToWindow();
+                });
+            }
+
+            const installResizeHandles = () => {
+                const handles = document.querySelectorAll('.resize-handle');
+                for (const handle of handles) {
+                    handle.addEventListener('mousedown', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const colKey = handle.getAttribute('data-col-key');
+                        if (!colKey) return;
+
+                        console.log('[resx-editor] resize start', colKey);
+
+                        // manual resize disables fit mode
+                        fitMode = false;
+                        applyFitModeClass();
+
+                        const colEl = getColElement(colKey);
+                        if (!colEl) {
+                            console.warn('[resx-editor] resize: missing <col> for key', colKey, { known: Object.keys(colMap) });
+                            return;
+                        }
+
+                        const startX = e.clientX;
+                        const defaultWidth = (defaultColumnWidths[colKey] !== undefined && defaultColumnWidths[colKey] !== null) ? defaultColumnWidths[colKey] : 200;
+                        const startWidth = Number.parseFloat(colEl.style.width || '0') || defaultWidth;
+                        const minWidth = colKey === '__actions' ? 60 : 80;
+
+                        document.body.style.userSelect = 'none';
+                        document.body.style.cursor = 'col-resize';
+
+                        const onMove = (moveEvent) => {
+                            const delta = moveEvent.clientX - startX;
+                            const nextWidth = Math.max(minWidth, Math.round(startWidth + delta));
+                            columnWidths = Object.assign({}, columnWidths, { [colKey]: nextWidth });
+                            colEl.style.width = String(nextWidth) + 'px';
+                        };
+
+                        const onUp = () => {
+                            window.removeEventListener('mousemove', onMove);
+                            window.removeEventListener('mouseup', onUp);
+                            document.body.style.userSelect = '';
+                            document.body.style.cursor = '';
+                            persistLayout();
+                        };
+
+                        window.addEventListener('mousemove', onMove);
+                        window.addEventListener('mouseup', onUp);
+                    });
+                }
+            };
+
+            // Initial layout
+            applyFitModeClass();
+            applyColumnWidths();
+            installResizeHandles();
+
+            console.log('[resx-editor] layout init', {
+                colsInDom: colEls.length,
+                handlesInDom: document.querySelectorAll('.resize-handle').length,
+                knownColKeys: Object.keys(colMap)
+            });
+
+            window.addEventListener('resize', () => {
+                if (fitMode) {
+                    fitColumnsToWindow();
+                }
+            });
 
             window.updateValue = function(element, key, language) {
                 if (!data[language]) {

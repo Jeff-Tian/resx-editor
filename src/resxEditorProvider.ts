@@ -13,7 +13,94 @@ interface ResxDocument {
     [language: string]: Map<string, ResxEntry>;
 }
 
+type UiLanguage = 'en' | 'zh-cn';
+
+type UiStringKey =
+    | 'addNewKey'
+    | 'fitColumns'
+    | 'saveAll'
+    | 'key'
+    | 'default'
+    | 'actions'
+    | 'uiLanguage'
+    | 'uiLanguageAuto'
+    | 'uiLanguageEn'
+    | 'uiLanguageZhCn'
+    | 'enterNewKeyPrompt'
+    | 'enterNewKeyPlaceholder'
+    | 'keyCannotBeEmpty'
+    | 'addedNewKey'
+    | 'confirmDeleteKey'
+    | 'delete'
+    | 'deletedKey'
+    | 'savedSuccessfully';
+
+const UI_STRINGS: Record<UiLanguage, Record<UiStringKey, string>> = {
+    en: {
+        addNewKey: 'Add New Key',
+        fitColumns: 'Fit Columns',
+        saveAll: 'Save All',
+        key: 'Key',
+        default: 'Default',
+        actions: 'Actions',
+        uiLanguage: 'UI Language',
+        uiLanguageAuto: 'Auto (VS Code)',
+        uiLanguageEn: 'English',
+        uiLanguageZhCn: '简体中文',
+        enterNewKeyPrompt: 'Enter new key name',
+        enterNewKeyPlaceholder: 'e.g., WelcomeMessage',
+        keyCannotBeEmpty: 'Key name cannot be empty',
+        addedNewKey: 'Added new key: {key}',
+        confirmDeleteKey: 'Are you sure you want to delete key "{key}"?',
+        delete: 'Delete',
+        deletedKey: 'Deleted key: {key}',
+        savedSuccessfully: 'Resx files saved successfully!'
+    },
+    'zh-cn': {
+        addNewKey: '新增 Key',
+        fitColumns: '适配列宽',
+        saveAll: '保存全部',
+        key: 'Key',
+        default: '默认',
+        actions: '操作',
+        uiLanguage: '界面语言',
+        uiLanguageAuto: '自动（跟随 VS Code）',
+        uiLanguageEn: 'English',
+        uiLanguageZhCn: '简体中文',
+        enterNewKeyPrompt: '请输入新 Key 名称',
+        enterNewKeyPlaceholder: '例如：WelcomeMessage',
+        keyCannotBeEmpty: 'Key 名称不能为空',
+        addedNewKey: '已新增 Key：{key}',
+        confirmDeleteKey: '确定要删除 Key “{key}” 吗？',
+        delete: '删除',
+        deletedKey: '已删除 Key：{key}',
+        savedSuccessfully: 'Resx 文件已保存！'
+    }
+};
+
 export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
+    private resolveUiLanguage(): UiLanguage {
+        const configured = vscode.workspace.getConfiguration().get<string>('resxEditor.uiLanguage', 'auto');
+        const raw = (configured === 'auto' ? vscode.env.language : configured).toLowerCase();
+
+        // Treat all zh-* (including zh-hans/zh-hant) as Simplified Chinese for now.
+        if (raw.startsWith('zh')) {
+            return 'zh-cn';
+        }
+        return 'en';
+    }
+
+    private t(lang: UiLanguage, key: UiStringKey, vars?: Record<string, string>): string {
+        let text = UI_STRINGS[lang][key] ?? UI_STRINGS.en[key] ?? key;
+        if (vars) {
+            for (const [k, v] of Object.entries(vars)) {
+                const token = `{${k}}`;
+                text = text.split(token).join(v);
+            }
+        }
+        return text;
+    }
+
     private escapeRegExp(input: string): string {
         return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
@@ -54,7 +141,9 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
 
         const updateWebview = async () => {
             const resxData = await this.loadResxFiles(document.uri);
+            const uiLanguage = this.resolveUiLanguage();
             webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview, resxData);
+            // Note: uiLanguage is embedded into HTML via getHtmlForWebview; re-render updates UI.
         };
 
         webviewPanel.webview.onDidReceiveMessage(
@@ -65,13 +154,26 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
                         case 'save':
                             await this.saveResxFiles(document.uri, message.data);
                             return;
+                        case 'setUiLanguage': {
+                            const value = String(message.value ?? 'auto');
+                            const allowed = new Set(['auto', 'en', 'zh-cn']);
+                            const next = allowed.has(value) ? value : 'auto';
+                            await vscode.workspace.getConfiguration().update(
+                                'resxEditor.uiLanguage',
+                                next,
+                                vscode.ConfigurationTarget.Global
+                            );
+                            await updateWebview();
+                            return;
+                        }
                         case 'requestAddRow':
+                            const uiLanguage = this.resolveUiLanguage();
                             const key = await vscode.window.showInputBox({
-                                prompt: 'Enter new key name',
-                                placeHolder: 'e.g., WelcomeMessage',
+                                prompt: this.t(uiLanguage, 'enterNewKeyPrompt'),
+                                placeHolder: this.t(uiLanguage, 'enterNewKeyPlaceholder'),
                                 validateInput: (value) => {
                                     if (!value || !value.trim()) {
-                                        return 'Key name cannot be empty';
+                                        return this.t(uiLanguage, 'keyCannotBeEmpty');
                                     }
                                     return null;
                                 }
@@ -79,19 +181,20 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
                             if (key) {
                                 await this.addNewRow(document.uri, key.trim());
                                 await updateWebview();
-                                vscode.window.showInformationMessage(`Added new key: ${key}`);
+                                vscode.window.showInformationMessage(this.t(uiLanguage, 'addedNewKey', { key }));
                             }
                             return;
                         case 'requestDeleteRow':
+                            const uiLanguageDelete = this.resolveUiLanguage();
                             const result = await vscode.window.showWarningMessage(
-                                `Are you sure you want to delete key "${message.key}"?`,
+                                this.t(uiLanguageDelete, 'confirmDeleteKey', { key: String(message.key) }),
                                 { modal: true },
-                                'Delete'
+                                this.t(uiLanguageDelete, 'delete')
                             );
-                            if (result === 'Delete') {
+                            if (result === this.t(uiLanguageDelete, 'delete')) {
                                 await this.deleteRow(document.uri, message.key);
                                 await updateWebview();
-                                vscode.window.showInformationMessage(`Deleted key: ${message.key}`);
+                                vscode.window.showInformationMessage(this.t(uiLanguageDelete, 'deletedKey', { key: String(message.key) }));
                             }
                             return;
                     }
@@ -104,6 +207,12 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
 
         await updateWebview();
 
+        const configSubscription = vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('resxEditor.uiLanguage')) {
+                updateWebview();
+            }
+        });
+
         const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument(e => {
             if (e.document.uri.toString() === document.uri.toString()) {
                 updateWebview();
@@ -112,6 +221,7 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
 
         webviewPanel.onDidDispose(() => {
             changeDocumentSubscription.dispose();
+            configSubscription.dispose();
         });
     }
 
@@ -181,7 +291,8 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             await this.writeResxFile(filePath, entries as any);
         }
 
-        vscode.window.showInformationMessage('Resx files saved successfully!');
+        const uiLanguage = this.resolveUiLanguage();
+        vscode.window.showInformationMessage(this.t(uiLanguage, 'savedSuccessfully'));
     }
 
     private async writeResxFile(filePath: string, entries: Record<string, ResxEntry>): Promise<void> {
@@ -358,6 +469,9 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
     }
 
     private getHtmlForWebview(webview: vscode.Webview, resxData: ResxDocument): string {
+        const uiLanguage = this.resolveUiLanguage();
+        const s = (key: UiStringKey) => this.t(uiLanguage, key);
+        const uiLanguageSetting = vscode.workspace.getConfiguration().get<string>('resxEditor.uiLanguage', 'auto');
         const languages = Object.keys(resxData);
         const allKeys = new Set<string>();
         
@@ -415,6 +529,8 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             margin-bottom: 20px;
             display: flex;
             gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
         }
         button {
             padding: 6px 12px;
@@ -426,6 +542,24 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
         }
         button:hover {
             background: var(--vscode-button-hoverBackground);
+        }
+        .toolbar-spacer {
+            flex: 1;
+        }
+        .toolbar-setting {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+        }
+        .toolbar-setting label {
+            opacity: 0.9;
+        }
+        .toolbar-setting select {
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border);
+            padding: 4px 8px;
         }
         .grid-container {
             overflow-x: auto;
@@ -509,9 +643,19 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
 </head>
 <body>
     <div class="toolbar">
-        <button onclick="addRow()">Add New Key</button>
-        <button id="fitColumnsBtn">Fit Columns</button>
-        <button onclick="saveData()">Save All</button>
+        <button onclick="addRow()">${escapeHtml(s('addNewKey'))}</button>
+        <button id="fitColumnsBtn">${escapeHtml(s('fitColumns'))}</button>
+        <button onclick="saveData()">${escapeHtml(s('saveAll'))}</button>
+
+        <span class="toolbar-spacer"></span>
+        <div class="toolbar-setting">
+            <label for="uiLanguageSelect">${escapeHtml(s('uiLanguage'))}</label>
+            <select id="uiLanguageSelect">
+                <option value="auto">${escapeHtml(s('uiLanguageAuto'))}</option>
+                <option value="en">${escapeHtml(s('uiLanguageEn'))}</option>
+                <option value="zh-cn">${escapeHtml(s('uiLanguageZhCn'))}</option>
+            </select>
+        </div>
     </div>
     
     <div class="grid-container" id="gridContainer">
@@ -521,9 +665,9 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             </colgroup>
             <thead>
                 <tr>
-                    <th class="resizable" data-col-key="__key">Key<div class="resize-handle" data-col-key="__key"></div></th>
-                    ${languages.map(lang => `<th class="resizable" data-col-key="${escapeHtml(lang)}">${lang === 'default' ? 'Default' : escapeHtml(lang)}<div class="resize-handle" data-col-key="${escapeHtml(lang)}"></div></th>`).join('')}
-                    <th>Actions</th>
+                    <th class="resizable" data-col-key="__key">${escapeHtml(s('key'))}<div class="resize-handle" data-col-key="__key"></div></th>
+                    ${languages.map(lang => `<th class="resizable" data-col-key="${escapeHtml(lang)}">${lang === 'default' ? escapeHtml(s('default')) : escapeHtml(lang)}<div class="resize-handle" data-col-key="${escapeHtml(lang)}"></div></th>`).join('')}
+                    <th>${escapeHtml(s('actions'))}</th>
                 </tr>
             </thead>
             <tbody>
@@ -538,7 +682,7 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
                             </td>
                         `).join('')}
                         <td class="action-cell">
-                            <button class="delete-btn" onclick="deleteRow('${escapeHtml(row.key)}')">Delete</button>
+                            <button class="delete-btn" onclick="deleteRow('${escapeHtml(row.key)}')">${escapeHtml(s('delete'))}</button>
                         </td>
                     </tr>
                 `).join('')}
@@ -550,6 +694,7 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
         (function() {
             const vscode = acquireVsCodeApi();
             const persistedState = vscode.getState() || {};
+            const uiLanguageSetting = ${JSON.stringify(uiLanguageSetting)};
             let data = ${JSON.stringify(resxData, (key, value) => 
                 value instanceof Map ? Object.fromEntries(value) : value
             )};
@@ -639,6 +784,17 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
             if (fitColumnsBtn) {
                 fitColumnsBtn.addEventListener('click', () => {
                     fitColumnsToWindow();
+                });
+            }
+
+            const uiLanguageSelect = document.getElementById('uiLanguageSelect');
+            if (uiLanguageSelect) {
+                uiLanguageSelect.value = uiLanguageSetting;
+                uiLanguageSelect.addEventListener('change', () => {
+                    vscode.postMessage({
+                        type: 'setUiLanguage',
+                        value: uiLanguageSelect.value
+                    });
                 });
             }
 

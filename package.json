@@ -31,7 +31,27 @@
         "command": "resxEditor.openEditor",
         "title": "Open Resx Editor"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Resx Editor",
+      "properties": {
+        "resxEditor.uiLanguage": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "en",
+            "zh-cn"
+          ],
+          "enumDescriptions": [
+            "Follow VS Code display language",
+            "English",
+            "简体中文"
+          ],
+          "description": "Resx Editor UI language. Default is to follow VS Code display language."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run compile",

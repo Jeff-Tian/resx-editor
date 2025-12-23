@@ -1,0 +1,57 @@
+name: Publish VS Code Extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-vsce
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Compile
+        run: pnpm run compile
+
+      - name: Validate tag matches package.json version
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "Tag: ${TAG_NAME}"
+          echo "package.json version: ${PKG_VERSION}"
+          if [ "${TAG_NAME}" != "v${PKG_VERSION}" ]; then
+            echo "ERROR: Tag must match package.json version (expected v${PKG_VERSION})"
+            exit 1
+          fi
+
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          pnpm dlx @vscode/vsce publish --pat "$VSCE_PAT"

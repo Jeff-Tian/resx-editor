@@ -60,6 +60,55 @@ pnpm install
 pnpm run compile
 ```
 
+## 发布到 VS Code 市场（Marketplace）
+
+### 1) 准备 Publisher
+
+1. 登录 https://marketplace.visualstudio.com/
+2. 创建 Publisher（Organization / Publisher）
+3. 在本项目的 package.json 中把 `publisher` 改成你创建的 publisher 名称
+
+### 2) 手动发布（首次建议手动）
+
+在仓库根目录运行：
+
+```bash
+pnpm install
+pnpm run compile
+pnpm dlx @vscode/vsce publish
+```
+
+发布时会要求登录/或使用 PAT。
+
+### 3) GitHub Actions 自动发布（tag release 流程）
+
+本仓库已包含 GitHub Actions 工作流：
+
+- `.github/workflows/ci.yml`：每次提交/PR 编译检查
+- `.github/workflows/publish.yml`：当你 push 一个 tag（例如 `v1.2.3`）时自动：
+   - 编译
+   - 校验 tag 必须等于 `v${package.json version}`
+   - 使用 `vsce` 发布到 Marketplace
+
+你需要在 GitHub 仓库 Settings -> Secrets and variables -> Actions 里添加：
+
+- `VSCE_PAT`：VS Code Marketplace 的 Personal Access Token
+
+注意：Marketplace 要求每次发布的版本号必须递增，所以 workflow 会自动提交一次版本号 bump。
+
+#### 如何触发一次发布
+
+1. 先修改 `package.json` 的 `version`（例如改成 `1.0.1`）
+2. 提交并 push 到远端
+3. 创建并 push tag：
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+随后 GitHub Actions 会自动发布。
+
 ### 监视模式
 
 ```bash

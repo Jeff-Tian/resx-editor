@@ -3,7 +3,7 @@
   "displayName": "Resx Editor",
   "description": "Visual editor for .NET resx files with multi-language support",
   "version": "1.0.0",
-  "publisher": "your-publisher-name",
+  "publisher": "jeff-tian",
   "packageManager": "pnpm@10.26.1+sha512.664074abc367d2c9324fdc18037097ce0a8f126034160f709928e9e9f95d98714347044e5c3164d65bd5da6c59c6be362b107546292a8eecb7999196e5ce58fa",
   "engines": {
     "vscode": "^1.80.0"
@@ -11,8 +11,15 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
   "main": "./out/extension.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jeff-Tian/resx-editor.git"
+  },
+  "homepage": "https://github.com/Jeff-Tian/resx-editor#readme",
+  "bugs": {
+    "url": "https://github.com/Jeff-Tian/resx-editor/issues"
+  },
   "contributes": {
     "customEditors": [
       {

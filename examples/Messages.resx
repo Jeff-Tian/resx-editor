@@ -64,9 +64,6 @@
   <data name="Goodbye" xml:space="preserve">
     <value>再见</value>
   </data>
-  <data name="helloagain" xml:space="preserve">
-    <value>你好呀</value>
-  </data>
   <data name="newkey" xml:space="preserve">
     <value>再说</value>
   </data>

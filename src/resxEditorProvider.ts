@@ -14,6 +14,18 @@ interface ResxDocument {
 }
 
 export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
+    private escapeRegExp(input: string): string {
+        return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    private tryGetCultureFromResxFileName(baseFileName: string, fileName: string): string | null {
+        // Matches: <base>.<culture>.resx where culture is BCP-47-ish, e.g. en-US, zh-Hans-CN, zh-hans-cn
+        // Keep the original casing from the filename so we don't accidentally write a different file name on save.
+        const escapedBase = this.escapeRegExp(baseFileName);
+        const match = fileName.match(new RegExp(`^${escapedBase}\\.([A-Za-z]{2,8}(?:-[A-Za-z0-9]{2,8})+)\\.resx$`, 'i'));
+        return match ? match[1] : null;
+    }
+
     public static register(context: vscode.ExtensionContext): vscode.Disposable {
         const provider = new ResxEditorProvider(context);
         const providerRegistration = vscode.window.registerCustomEditorProvider(
@@ -117,9 +129,8 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
 
         // Load language-specific files
         for (const file of files) {
-            const match = file.match(new RegExp(`^${baseFileName}\\.([a-zA-Z]{2}-[a-zA-Z]{2})\\.resx$`));
-            if (match) {
-                const language = match[1];
+            const language = this.tryGetCultureFromResxFileName(baseFileName, file);
+            if (language) {
                 const filePath = path.join(dir, file);
                 const content = await this.parseResxFile(filePath);
                 resxFiles[language] = content;
@@ -267,8 +278,8 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
 
         // Add to all language-specific files
         for (const file of files) {
-            const match = file.match(new RegExp(`^${baseFileName}\\.([a-zA-Z]{2}-[a-zA-Z]{2})\\.resx$`));
-            if (match) {
+            const language = this.tryGetCultureFromResxFileName(baseFileName, file);
+            if (language) {
                 const filePath = path.join(dir, file);
                 await this.addKeyToFile(filePath, key);
             }
@@ -316,8 +327,8 @@ export class ResxEditorProvider implements vscode.CustomTextEditorProvider {
 
         const resxFiles = [basePath];
         for (const file of files) {
-            const match = file.match(new RegExp(`^${baseFileName}\\.([a-zA-Z]{2}-[a-zA-Z]{2})\\.resx$`));
-            if (match) {
+            const language = this.tryGetCultureFromResxFileName(baseFileName, file);
+            if (language) {
                 resxFiles.push(path.join(dir, file));
             }
         }

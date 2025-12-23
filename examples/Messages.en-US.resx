@@ -64,9 +64,6 @@
   <data name="Goodbye" xml:space="preserve">
     <value>Goodbye</value>
   </data>
-  <data name="helloagain" xml:space="preserve">
-    <value>hello again</value>
-  </data>
   <data name="newkey" xml:space="preserve">
     <value>no</value>
   </data>
